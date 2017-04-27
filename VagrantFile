@@ -1,0 +1,136 @@
+# -*- mode: ruby -*-
+# vi: set ft=ruby :
+require 'yaml'
+
+project_config = {}
+
+begin
+  project_config = YAML.load_file('vagrant.yaml');
+rescue Errno::ENOENT
+  project_config = {
+    name: nil,
+    password: nil,
+    ip: nil,
+    url: nil
+  }
+end
+
+# Run on first load, or if these are not set.
+if project_config['name'] == nil
+  puts "Enter a project name"
+  project_config['name'] = STDIN.gets.chomp
+
+  system("vagrant plugin install vagrant-triggers");
+end
+
+if project_config['password'] == nil
+  puts "Enter a password to use for MySQL"
+  project_config['password'] = STDIN.gets.chomp
+end
+
+if project_config['ip'] == nil
+  puts "Enter a vacant IP Address (the last 3 digits only)"
+  project_config['ip'] = "192.168.50." + STDIN.gets.chomp
+end
+
+if project_config['url'] == nil
+  puts "Enter a development URL without http:// and .dev will be appended automatically."
+  project_config['url'] = STDIN.gets.chomp
+end
+
+File.open('vagrant.yaml', 'w') do |f|
+  f.sync = true
+  f.write project_config.to_yaml
+end
+
+
+Vagrant.configure(2) do |config|
+
+	project_config = YAML.load_file('vagrant.yaml')
+
+	config.vm.box = "bento/ubuntu-16.04"
+  config.vm.network "private_network", ip: project_config['ip'].to_s, guest: 80, host: 8080, auto_correct: true
+  config.vm.network "public_network", guest: 80, host: 8080, auto_correct: true, :netmask => '255.255.255.0'
+	config.vm.provision :shell, path: "bootstrap.sh", privileged: false, args: [project_config['name'].to_s, project_config['password'].to_s]
+	config.vm.synced_folder ".", "/var/www/vhosts/" + project_config['name'].to_s, owner: "vagrant", group: "www-data", mount_options: ["dmode=777,fmode=777"]
+
+  config.trigger.after [:up] do
+    system("echo " + project_config['ip'].to_s + " " + project_config['url'].to_s +  " | sudo tee -a /etc/hosts")
+  end
+
+  config.trigger.after [:halt, :destroy] do
+    # Removes the host from the /etc/hosts file
+    system("sudo sed '/" + project_config['ip'].to_s + " " + project_config['url'].to_s + "/d' /etc/hosts >> /dev/null")
+
+  end
+
+  config.trigger.after [:destroy] do
+
+		# Resets the project config
+		project_config['name'] = nil
+		project_config['password'] = nil
+		project_config['url'] = nil
+		project_config['ip'] = nil
+
+		File.open('vagrant.yaml', 'w') do |f|
+			f.write project_config.to_yaml
+		end
+  end
+
+  config.trigger.after [:up, :provision, :reload] do
+    print(%{
+
+      :::::::-.      ...   :::.    :::..,::::::
+       ;;,   `';, .;;;;;;;.`;;;;,  `;;;;;;;''''
+       `[[     [[,[[     \[[,[[[[[. '[[ [[cccc
+        $$,    $$$$$,     $$$$$$ "Y$c$$ $$""""
+        888_,o8P'"888,_ _,88P888    Y88 888oo,__
+        MMMMP"`    "YMMMMMP" MMM     YM """"YUMMM
+
+              Welcome to the future.
+
+
+
+    })
+    system('echo "            ip: "' + project_config['ip'])
+    system('echo "            url:"' + project_config['url'])
+    print(%{
+
+
+
+
+      })
+  end
+
+  config.trigger.after [:halt] do
+    print(%{
+
+      :::  .   ::: :::      :::    .,:::::::::::::-.
+       ;;; .;;,.;;; ;;;      ;;;    ;;;;'''' ;;,   `';,
+       [[[[[/'  [[[ [[[      [[[     [[cccc  `[[     [[
+      _$$$$,    $$$ $$'      $$'     $$""""   $$,    $$
+      "888"88o, 888o88oo,.__o88oo,.__888oo,__ 888_,o8P'
+       MMM "MMP"MMM""""YUMMM""""YUMMM""""YUMMMMMMMP"`
+
+
+                    It's been nice.
+
+
+
+    })
+    system('echo "               ip: "' + project_config['ip'])
+    system('echo "               url:"' + project_config['url'])
+    print(%{
+
+
+
+
+      })
+
+  end
+
+
+  config.vm.provider "virtualbox" do |vb|
+    vb.memory = "1024"
+  end
+end
